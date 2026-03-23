@@ -1,0 +1,22 @@
+###
+### example.com
+###
+
+root@example.com                  me@example.com
+
+# Basic system aliases -- these MUST be present.
+MAILER-DAEMON@example.com         postmaster@example.com
+postmaster@example.com            root@example.com
+# Standard RFC2142 aliases.
+abuse@example.com                 postmaster@example.com
+ftp@example.com                   root@example.com
+hostmaster@example.com            root@example.com
+news@example.com                  usenet@example.com
+noc@example.com                   root@example.com
+security@example.com              root@example.com
+usenet@example.com                root@example.com
+uucp@example.com                  root@example.com
+webmaster@example.com             root@example.com
+www@example.com                   webmaster@example.com
+
+spam@example.com                  /dev/null

@@ -1,0 +1,348 @@
+secrets:
+  dcron_duplicity_gpg_pass:
+    environment: DCRON_DUPLICITY_GPG_PASS
+  wg_home_private_key:
+    environment: WG_HOME_PRIVATE_KEY
+  caddy_ca_key:
+    environment: CADDY_CA_KEY
+  postfix_dkim_key:
+    environment: POSTFIX_DKIM_KEY
+  courier_userdb:
+    environment: COURIER_USERDB
+
+networks:
+  default: # Not used, but mentioned because it'll be created by docker compose anyway.
+  mail: # Access to postfix for sending emails.
+    driver_opts:
+      com.docker.network.bridge.name: br-mail # Fixed name for nftables.
+  mail-internal: # Access to internal services used by postfix.
+
+volumes:
+  dcron-duplicity-cache:
+  djbdns-root-wan:
+  caddy-config:
+  caddy-data:
+  virtual-mailbox:
+  postfix-log:
+  postsrsd-data:
+  postgrey-cache:
+  courier-auth:
+  docker-socket:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "size=1k,uid=65534,mode=0700,noexec"
+  netdata-lib:
+  netdata-cache:
+  prom-metrics:
+
+services:
+  nftables:
+    build: "nftables"
+    container_name: "nftables"
+    restart: always
+    init: true
+    cap_add:
+      - NET_ADMIN
+    network_mode: host
+    volumes:
+      - "/dev/log:/dev/log:ro"
+    environment:
+      WAN_IFNAME: "${WAN_IFNAME:?}"
+      WAN_IP: "${WAN_IP:?}"
+      WAN_RESERVED_IP: "${WAN_RESERVED_IP:?}"
+      WAN_ANCHOR_IP: "${WAN_ANCHOR_IP:?}"
+      WAN_ANCHOR_NET: "${WAN_ANCHOR_NET:?}"
+      PRIVATE_IFNAME: "${PRIVATE_IFNAME:?}"
+      PRIVATE_IP: "${PRIVATE_IP:?}"
+      PRIVATE_NET: "${PRIVATE_NET:?}"
+
+  dcron:
+    build:
+      context: "dcron"
+      secrets:
+        - dcron_duplicity_gpg_pass
+    container_name: "dcron"
+    restart: always
+    init: true # https://github.com/dubiousjim/dcron/issues/13
+    networks:
+      - "mail"
+    volumes:
+      - "/dev/log:/dev/log:ro"
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "postfix-log:/var/log/postfix"
+      - "dcron-duplicity-cache:/root/.cache/duplicity"
+      - "virtual-mailbox:/data/virtual-mailbox:ro"
+      - "postsrsd-data:/data/postsrsd:ro"
+      - "prom-metrics:/prom"
+    environment:
+      RCLONE_ACCESS_KEY_ID: "${DCRON_RCLONE_ACCESS_KEY_ID:?}"
+      RCLONE_SECRET_ACCESS_KEY: "${DCRON_RCLONE_SECRET_ACCESS_KEY:?}"
+
+  wireguard-home:
+    build:
+      context: "wireguard"
+      args:
+        INTERFACE: "wg.home"
+      secrets:
+        - source: wg_home_private_key
+          target: private_key
+    container_name: "wireguard-home"
+    restart: always
+    cap_add:
+      - NET_ADMIN
+    network_mode: host
+    volumes:
+      - "/dev/log:/dev/log:ro"
+
+  tinydns-wan:
+    build:
+      context: "djbdns"
+      target: "tinydns-wan"
+    container_name: "tinydns-wan"
+    restart: always
+    init: true
+    ports:
+      - "${WAN_ANCHOR_IP:?}:53:53/udp" # Can't listen on 0.0.0.0 because of systemd-resolve on 127.0.0.53.
+    volumes:
+      - "/dev/log:/dev/log:ro"
+      - "djbdns-root-wan:/home/djbdns/root"
+
+  axfrdns-wan:
+    build:
+      context: "djbdns"
+      target: "axfrdns-wan"
+    container_name: "axfrdns-wan"
+    restart: always
+    ports:
+      - "${WAN_ANCHOR_IP:?}:53:53" # Can't listen on 0.0.0.0 because of systemd-resolve on 127.0.0.53.
+    volumes:
+      - "/dev/log:/dev/log:ro"
+      - "djbdns-root-wan:/home/djbdns/root:ro"
+
+  caddy:
+    build:
+      context: "caddy"
+      secrets:
+        - caddy_ca_key
+    container_name: "caddy"
+    restart: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway" # To access netdata running with "network_mode: host".
+    ports:
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - "/dev/log:/dev/log:ro"
+      - "caddy-config:/config"
+      - "caddy-data:/data"
+      - "djbdns-root-wan:/srv/primary.example.com/djbdns:ro"
+    environment:
+      BASICAUTH_ME: "${CADDY_BASICAUTH_ME:?}"
+      BASICAUTH_SECONDARY_DNS: "${CADDY_BASICAUTH_SECONDARY_DNS:?}"
+
+  postfix:
+    build:
+      context: "postfix"
+      target: "postfix"
+      args:
+        UID_POSTFIX: "${UID_POSTFIX:?}"
+        GID_POSTFIX: "${GID_POSTFIX:?}"
+        GID_POSTDROP: "${GID_POSTDROP:?}"
+    container_name: "postfix"
+    restart: always
+    init: true
+    ports:
+      - "25:25"
+      - "26:25" # Alternate smtp port to work around ISP blocking port 25.
+      - "587:587"
+      - "465:465"
+    networks:
+      - "mail" # Must be eth0.
+      - "mail-internal"
+    volumes:
+      - "/dev/log:/dev/log:ro"
+      - "/var/spool/postfix:/var/spool/postfix"
+      - "postfix-log:/var/log/postfix"
+      - "caddy-data:/tls:ro"
+      - "courier-auth:/var/spool/authdaemon:ro"
+      - "virtual-mailbox:/var/mail/vhosts"
+    environment:
+      MY_ORIGIN: "${POSTFIX_MY_ORIGIN:?}"
+
+  opendkim:
+    build:
+      context: "postfix"
+      target: "opendkim"
+      secrets:
+        - postfix_dkim_key
+    container_name: "opendkim"
+    restart: always
+    networks:
+      - "mail-internal"
+      - "mail" # Must be eth1. Needed for detecting network address, not for sending emails.
+    volumes:
+      - "/dev/log:/dev/log:ro"
+
+  opendmarc:
+    build:
+      context: "postfix"
+      target: "opendmarc"
+    container_name: "opendmarc"
+    restart: always
+    networks:
+      - "mail-internal"
+      - "mail" # Must be eth1. Needed for detecting network address, not for sending emails.
+    volumes:
+      - "/dev/log:/dev/log:ro"
+
+  postsrsd:
+    build:
+      context: "postfix"
+      target: "postsrsd"
+    container_name: "postsrsd"
+    restart: always
+    init: true
+    networks:
+      - "mail-internal"
+    volumes:
+      - "/dev/log:/dev/log:ro"
+      - "postsrsd-data:/data"
+
+  postgrey:
+    build:
+      context: "postfix"
+      target: "postgrey"
+    container_name: "postgrey"
+    restart: always
+    networks:
+      - "mail-internal"
+    volumes:
+      - "/dev/log:/dev/log:ro"
+      - "postgrey-cache:/var/spool/postfix/postgrey"
+
+  courier-auth:
+    build:
+      context: "courier"
+      target: "courier-auth"
+      secrets:
+        - courier_userdb
+    container_name: "courier-auth"
+    restart: always
+    volumes:
+      - "/dev/log:/dev/log:ro"
+      - "courier-auth:/var/spool/authdaemon"
+
+  courier-imap-ssl:
+    build:
+      context: "courier"
+      target: "courier-imap-ssl"
+    container_name: "courier-imap-ssl"
+    restart: always
+    ports:
+      - "993:993"
+    volumes:
+      - "/dev/log:/dev/log:ro"
+      - "courier-auth:/var/spool/authdaemon:ro"
+      - "virtual-mailbox:/var/mail/vhosts"
+      - "caddy-data:/tls:ro"
+
+  courier-pop3-ssl:
+    build:
+      context: "courier"
+      target: "courier-pop3-ssl"
+    container_name: "courier-pop3-ssl"
+    restart: always
+    ports:
+      - "995:995"
+    volumes:
+      - "/dev/log:/dev/log:ro"
+      - "courier-auth:/var/spool/authdaemon:ro"
+      - "virtual-mailbox:/var/mail/vhosts"
+      - "caddy-data:/tls:ro"
+
+  docker-socket-proxy:
+    image: "wollomatic/socket-proxy:1.11.4"
+    healthcheck:
+      test: ["CMD", "./healthcheck"]
+    container_name: "docker-socket-proxy"
+    restart: always
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges
+    user: "65534:${GID_DOCKER:?}"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "docker-socket:/socket/"
+    command:
+      - '-allowhealthcheck'
+      - '-watchdoginterval=60'
+      - '-stoponwatchdog'
+      - '-proxysocketendpoint=/socket/docker.sock'
+      - '-proxysocketendpointfilemode=0666'
+      # PING, VERSION, EVENTS - Mostly harmless and almost required for any service.
+      # CONTAINERS - For Netdata.
+      # INFO, IMAGES - For Netdata go.d docker plugin.
+      - '-allowHEAD=(/v1\.\d\d)?/_ping'
+      - '-allowGET=(/v1\.\d\d)?/(_ping|version|events|info|containers/.*|images/.*)'
+
+  postfix-exporter:
+    build: "postfix-exporter"
+    container_name: "postfix-exporter"
+    restart: always
+    ports:
+      - "127.0.0.1:9154:9154"
+    volumes:
+      - "postfix-log:/var/log/postfix:ro"
+      - "/var/spool/postfix:/var/spool/postfix:ro"
+    command:
+      - "--postfix.logfile_path=/var/log/postfix/log"
+      - "--postfix.smtpd_service_label=smtpd"
+      - "--postfix.smtpd_service_label=submission/smtpd"
+      - "--postfix.smtpd_service_label=submissions/smtpd"
+
+  netdata:
+    build:
+      context: "netdata"
+      args:
+        UID_POSTFIX: "${UID_POSTFIX:?}"
+        GID_POSTFIX: "${GID_POSTFIX:?}"
+        GID_POSTDROP: "${GID_POSTDROP:?}"
+    container_name: "netdata"
+    restart: always
+    pid: host
+    cap_add:
+      - SYS_PTRACE
+      - SYS_ADMIN
+    security_opt:
+      - "apparmor:unconfined"
+    network_mode: host
+    volumes:
+      - "/dev/log:/dev/log:ro"
+      - "netdata-lib:/var/lib/netdata"
+      - "netdata-cache:/var/cache/netdata"
+      - "/etc/passwd:/host/etc/passwd:ro"
+      - "/etc/group:/host/etc/group:ro"
+      - "/etc/localtime:/etc/localtime:ro"
+      - "/proc:/host/proc:ro"
+      - "/sys:/host/sys:ro"
+      - "/etc/os-release:/host/etc/os-release:ro"
+      - "/var/log:/host/var/log:ro"
+      - "/var/lib/apt/periodic:/host/var/lib/apt/periodic:ro" # filecheck (apt updates)
+      - "/run/dbus:/run/dbus:ro" # systemd-list-units
+      - "/run/systemd/private:/run/systemd/private:ro" # systemdunits
+      - "/var/spool/postfix:/var/spool/postfix:ro"
+      - "/boot:/boot:ro" # disk usage
+      - "/run:/host/run:ro" # disk usage
+      - "caddy-data:/tls:ro" # x509check
+      - "docker-socket:/socket/:ro" # docker-socket-proxy
+      - "prom-metrics:/prom:ro" # backup metrics
+    environment:
+      DOCKER_HOST: "unix:///socket/docker.sock" # docker-socket-proxy
+      DISABLE_TELEMETRY: "1"
+      HOST_GATEWAY_IP: "${HOST_GATEWAY_IP:?}"
+      TG_CHAT_ID: "${NETDATA_TG_CHAT_ID:?}"
+      TG_TOKEN: "${NETDATA_TG_TOKEN:?}"

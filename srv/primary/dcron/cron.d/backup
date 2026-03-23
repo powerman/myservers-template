@@ -1,0 +1,2 @@
+# MIN HOUR DAY MONTH DAYOFWEEK   COMMAND
+* * * * * ID=backup FREQ=1d backup.sh --allow-source-mismatch

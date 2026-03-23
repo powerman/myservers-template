@@ -1,0 +1,7 @@
+# Deployed to servers as ~/.myserver/fnox.local.toml.
+# Keep only provider definitions here — no secrets, no behavior settings.
+default_provider = "age"
+
+[providers.age]
+type = "age"
+recipients = ["EXAMPLE"]

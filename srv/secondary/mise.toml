@@ -1,0 +1,9 @@
+[plugins]
+fnox-env = "https://github.com/jdx/mise-env-fnox"
+
+[tools]
+fnox = "latest"
+
+[env]
+_.fnox-env = { tools = true }
+_.source = { tools = true, path = 'host-facts.sh' }

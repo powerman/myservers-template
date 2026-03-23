@@ -1,0 +1,7 @@
+if_missing = "error"
+
+[secrets]
+CADDY_BASICAUTH_ME = { provider = "age", value = "EXAMPLE" }
+NETDATA_TG_TOKEN = { provider = "age", value = "EXAMPLE" }
+NETDATA_TG_CHAT_ID = { provider = "age", value = "EXAMPLE" }
+DJBDNS_SECONDARY_BASICAUTH_PRIMARY_EXAMPLE_COM = { provider = "age", value = "EXAMPLE" }

@@ -1,0 +1,2 @@
+# MIN HOUR DAY MONTH DAYOFWEEK   COMMAND
+* * * * * docker exec tinydns-secondary make >/dev/null

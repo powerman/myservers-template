@@ -1,0 +1,7 @@
+[DO]
+type = s3
+provider = DigitalOcean
+env_auth = false
+access_key_id = {{ .Env.RCLONE_ACCESS_KEY_ID }}
+secret_access_key = {{ .Env.RCLONE_SECRET_ACCESS_KEY }}
+endpoint = ams3.digitaloceanspaces.com

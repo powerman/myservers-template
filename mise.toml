@@ -1,0 +1,85 @@
+[settings]
+lockfile = true # DO NOT FORGET TO `touch mise.lock` if mise.lock does not exist!
+
+
+[env]
+# Use fallback values in host-facts.sh instead of detecting real hardware.
+# On the server, the root mise.toml is absent, so DEVEL is unset.
+DEVEL = "true"
+# Secrets are decrypted on the server, not locally.
+# FNOX_AGE_KEY=false prevents leaking the age key to AI agent through environment variables.
+FNOX_AGE_KEY = false
+
+
+[tools]
+
+#--- Format
+# A shell formatter.
+shfmt = "latest"
+
+#--- Lint
+# Static checker for GitHub Actions workflow files.
+actionlint = 'latest'
+# Dockerfile linter, validate inline bash, written in Haskell.
+hadolint = "latest"
+# A static analysis tool for shell scripts.
+shellcheck = "latest"
+
+
+[tasks.generate]
+description = 'Generate everything'
+depends = ['generate:*']
+
+[tasks.fmt]
+description = 'Format all files'
+depends = ['fmt:*']
+
+[tasks.lint]
+description = 'Run all linters'
+depends = ['lint:*']
+
+[tasks.test]
+description = 'Run all tests'
+depends = ['test:*']
+
+[tasks.default]
+description = 'Run all linters and tests'
+depends = ['lint', 'test']
+
+[tasks.ci]
+description = 'Run all CI tasks'
+depends = ['fmt', 'lint', 'test']
+run = '! git status --porcelain | tee /dev/stderr | grep -q .' # Is working tree clean after fmt?
+
+[tasks.'generate:mermaid']
+description = 'Generate Mermaid diagrams'
+sources = ['srv/*.mmd']
+outputs = ['srv/*.mmd.png']
+run = '''
+{% for file in task_source_files() %}
+    docker run --rm -u 0 -v $PWD:/data minlag/mermaid-cli -e png -w 1600 -i {{ file }}
+{% endfor %}
+'''
+
+[tasks.'fmt:shell']
+description = 'Format shell scripts'
+shell = 'bash -O globstar -c'
+run = 'shfmt --write --indent 4 --simplify **/*.sh'
+
+[tasks.'lint:workflows']
+description = 'Lint GitHub Action workflows'
+run = 'actionlint'
+
+[tasks.'lint:dockerfiles']
+description = 'Lint Dockerfiles'
+shell = 'bash -O globstar -c'
+run = 'hadolint **/Dockerfile'
+
+[tasks.'lint:shell']
+description = 'Lint shell scripts'
+shell = 'bash -O globstar -c'
+run = 'shellcheck -x **/*.sh'
+
+[tasks.cachedir]
+hide = true
+run = 'mkdir -p .cache'

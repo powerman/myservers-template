@@ -1,0 +1,133 @@
+#!/sbin/nft -f
+
+# Packet flow: https://wiki.nftables.org/wiki-nftables/index.php/Netfilter_hooks
+
+# This file is designed to be reloadable without breaking existing docker rules.
+
+# FAMIL TABLE   CHAIN                       TYPE    HOOK        PRIORITY            POLICY
+# inet  filter  antispoof                   filter  prerouting  -300 (raw)          drop
+# inet  filter  prerouting-before-docker    filter  prerouting  -102 (dstnat-2)     drop
+#                 in-all
+#                 in-local
+#                 in-docker
+# ip    nat     (docker) PREROUTING         nat     prerouting  -100 (dstnat)       accept
+#                 (docker) DOCKER
+# ip    nat     (docker) OUTPUT             nat     output      -100 (dstnat)       accept
+#                 (docker) DOCKER
+# ip    filter  (docker) FORWARD            filter  forward      0 (filter)         drop
+#                 DOCKER-USER
+# ip    nat     (docker) POSTROUTING        nat     postrouting  100 (srcnat)       accept
+
+define WAN_IFNAME = {{ .Env.WAN_IFNAME }}
+define WAN_IP = {{ .Env.WAN_IP }}
+define DOCKER_ADDR_POOL = 172.16.0.0/12
+
+# Family inet is used to separate from docker rules in ip family. IPv6 is disabled by sysctl.
+flush ruleset inet
+flush chain ip filter DOCKER-USER
+
+table inet filter {
+    chain antispoof {
+        type filter hook prerouting priority raw; policy drop;
+
+        # Loopback: kernel ensures only local traffic arrives on lo.
+        iifname "lo" accept
+        # Docker bridges: allow only Docker-assigned source addresses.
+        iifname { "docker0", "br-*" } ip saddr $DOCKER_ADDR_POOL accept
+
+        # Silently drop non-routable/junk source addresses from any interface.
+        # - DHCP discover/relay. Replace with accept on interfaces running a DHCP relay.
+        ip saddr 0.0.0.0/8 counter drop
+        # - Link-local/APIPA. Replace with accept on interfaces using link-local addressing.
+        ip saddr 169.254.0.0/16 counter drop
+        # - Multicast as source address (invalid per RFC 5735, but seen from broken software).
+        ip saddr 224.0.0.0/4 counter drop
+        # - Reserved/class E (RFC 1112). Replace with accept when IANA allocates this range.
+        ip saddr 240.0.0.0/4 counter drop
+
+        # External: accept only public (non-private/reserved) source addresses.
+        iifname $WAN_IFNAME ip saddr != { 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 } accept
+
+        # Log and drop everything else (spoofed source from any interface).
+        limit rate 5/minute log prefix "nft antispoof: "
+        counter
+    }
+
+    chain log-drop-ext-daddr {
+        limit rate 5/minute log prefix "nft ext-daddr: "
+        counter drop
+    }
+
+    chain in-all {
+        iifname { "lo", "docker0", "br-*" } accept
+
+        ct state invalid drop
+        ct state established,related accept
+
+        ip protocol icmp accept
+        ip protocol igmp accept
+    }
+
+    chain in-local {
+        tcp dport ssh accept
+    }
+
+    chain in-docker {
+        meta l4proto { tcp, udp } th dport { domain, https } accept
+        tcp dport { smtp } accept
+    }
+
+    chain prerouting-before-docker {
+        type filter hook prerouting priority dstnat - 2; policy drop;
+
+        # Require manually open ports for all "local" (local/docker/forwarded) services from
+        # untrusted (external) interfaces, to make sure port occasionally published by docker
+        # won't become available for everyone.
+        # It has to be done before docker's `chain ip nat PREROUTING` otherwise it will dnat
+        # ports published by docker and it'll become too hard to filter them at later stage.
+        # - Drop external packets not destined to this server's addresses
+        #   to prevent routing into internal networks (e.g. VPN, Docker) from the internet.
+        iifname $WAN_IFNAME ip daddr != $WAN_IP goto log-drop-ext-daddr
+        # - Accept non-local destination from trusted interfaces (Docker outbound, forwarded).
+        fib daddr type != local accept
+        # - Accept local traffic from trusted interfaces.
+        jump in-all
+        ip daddr $WAN_IP jump in-local
+        ip daddr $WAN_IP jump in-docker
+    }
+}
+
+# table ip nat {
+#     chain PREROUTING {
+#         type nat hook prerouting priority dstnat; policy accept;
+#         fib daddr type local jump DOCKER
+#     }
+#     chain OUTPUT {
+#         type nat hook output priority -100; policy accept;
+#         ip daddr != 127.0.0.0/8 fib daddr type local jump DOCKER
+#     }
+#     chain DOCKER {
+#         ... docker-published IP:port dnat to container's IP:port
+
+# table ip filter {
+#     chain FORWARD {
+#         type filter hook forward priority filter; policy drop;
+#         jump DOCKER-USER
+#         ... allow from/to docker's IP/interface
+
+table ip filter {
+    chain DOCKER-USER {
+        ct state established,related accept
+
+        # Allow outbound SMTP only from postfix container's network (br-mail).
+        # All other sources (e.g. VPN clients, other containers) are blocked
+        # to prevent spam that could get the server's IP blacklisted.
+        iifname "br-mail" tcp dport smtp accept
+        oifname $WAN_IFNAME tcp dport smtp drop
+    }
+}
+
+# table ip nat {
+#     chain POSTROUTING {
+#         type nat hook postrouting priority srcnat; policy accept;
+#         ... masquerade from docker's IP

@@ -1,0 +1,54 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "schedule": [
+    "before 5am"
+  ],
+  "prConcurrentLimit": 20,
+  "osvVulnerabilityAlerts": true,
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/(^|/)Dockerfile$/"
+      ],
+      "matchStrings": [
+        "v_postgrey=\"(?<currentValue>version-[\\d.]+)\""
+      ],
+      "depNameTemplate": "schweikert/postgrey",
+      "datasourceTemplate": "github-tags",
+      "extractVersionTemplate": "^version-(?<version>.+)$",
+      "versioningTemplate": "loose"
+    }
+  ],
+  "packageRules": [
+    {
+      "matchManagers": [
+        "github-actions"
+      ],
+      "semanticCommitType": "chore",
+      "semanticCommitScope": "ci"
+    },
+    {
+      "matchManagers": [
+        "docker-compose",
+        "dockerfile"
+      ],
+      "semanticCommitType": "chore",
+      "semanticCommitScope": "deps"
+    },
+    {
+      "groupName": "alpine",
+      "matchManagers": [
+        "docker-compose",
+        "dockerfile"
+      ],
+      "matchPackageNames": [
+        "alpine",
+        "powerman/dockerize"
+      ]
+    }
+  ]
+}

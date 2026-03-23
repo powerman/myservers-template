@@ -1,0 +1,210 @@
+networks:
+  default: # Not used, but mentioned because it'll be created by docker compose anyway.
+  mail: # Access to postfix for sending emails.
+    driver_opts:
+      com.docker.network.bridge.name: br-mail # Fixed name for nftables.
+  mail-internal: # Access to internal services used by postfix.
+
+volumes:
+  djbdns-root-secondary:
+  caddy-config:
+  caddy-data:
+  postfix-log:
+  postgrey-cache:
+  docker-socket:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "size=1k,uid=65534,mode=0700,noexec"
+  netdata-lib:
+  netdata-cache:
+
+services:
+  nftables:
+    build: "nftables"
+    container_name: "nftables"
+    restart: always
+    init: true
+    cap_add:
+      - NET_ADMIN
+    network_mode: host
+    volumes:
+      - "/dev/log:/dev/log:ro"
+    environment:
+      WAN_IFNAME: "${WAN_IFNAME:?}"
+      WAN_IP: "${WAN_IP:?}"
+
+  dcron:
+    build:
+      context: "dcron"
+    container_name: "dcron"
+    restart: always
+    init: true # https://github.com/dubiousjim/dcron/issues/13
+    networks:
+      - "mail"
+    volumes:
+      - "/dev/log:/dev/log:ro"
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "postfix-log:/var/log/postfix"
+
+  tinydns-secondary:
+    build:
+      context: "djbdns"
+      target: "tinydns-secondary"
+    container_name: "tinydns-secondary"
+    restart: always
+    init: true
+    ports:
+      - "${WAN_IP:?}:53:53/udp" # Can't listen on 0.0.0.0 because of systemd-resolve on 127.0.0.53.
+    volumes:
+      - "/dev/log:/dev/log:ro"
+      - "djbdns-root-secondary:/home/djbdns/root"
+    environment:
+      BASICAUTH_PRIMARY_EXAMPLE_COM: "${DJBDNS_SECONDARY_BASICAUTH_PRIMARY_EXAMPLE_COM:?}"
+
+  axfrdns-secondary:
+    build:
+      context: "djbdns"
+      target: "axfrdns-secondary"
+    container_name: "axfrdns-secondary"
+    restart: always
+    ports:
+      - "${WAN_IP:?}:53:53" # Can't listen on 0.0.0.0 because of systemd-resolve on 127.0.0.53.
+    volumes:
+      - "/dev/log:/dev/log:ro"
+      - "djbdns-root-secondary:/home/djbdns/root:ro"
+
+  caddy:
+    build:
+      context: "caddy"
+    container_name: "caddy"
+    restart: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway" # To access netdata running with "network_mode: host".
+    ports:
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - "/dev/log:/dev/log:ro"
+      - "caddy-config:/config"
+      - "caddy-data:/data"
+    environment:
+      BASICAUTH_ME: "${CADDY_BASICAUTH_ME:?}"
+
+  postfix:
+    build:
+      context: "postfix"
+      target: "postfix"
+      args:
+        UID_POSTFIX: "${UID_POSTFIX:?}"
+        GID_POSTFIX: "${GID_POSTFIX:?}"
+        GID_POSTDROP: "${GID_POSTDROP:?}"
+    container_name: "postfix"
+    restart: always
+    init: true
+    ports:
+      - "25:25"
+    networks:
+      - "mail" # Must be eth0.
+      - "mail-internal"
+    volumes:
+      - "/dev/log:/dev/log:ro"
+      - "/var/spool/postfix:/var/spool/postfix"
+      - "postfix-log:/var/log/postfix"
+      - "caddy-data:/tls:ro"
+    environment:
+      MY_ORIGIN: "${POSTFIX_MY_ORIGIN:?}"
+
+  postgrey:
+    build:
+      context: "postfix"
+      target: "postgrey"
+    container_name: "postgrey"
+    restart: always
+    networks:
+      - "mail-internal"
+    volumes:
+      - "/dev/log:/dev/log:ro"
+      - "postgrey-cache:/var/spool/postfix/postgrey"
+
+  docker-socket-proxy:
+    image: "wollomatic/socket-proxy:1.11.4"
+    healthcheck:
+      test: ["CMD", "./healthcheck"]
+    container_name: "docker-socket-proxy"
+    restart: always
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges
+    user: "65534:${GID_DOCKER:?}"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "docker-socket:/socket/"
+    command:
+      - '-allowhealthcheck'
+      - '-watchdoginterval=60'
+      - '-stoponwatchdog'
+      - '-proxysocketendpoint=/socket/docker.sock'
+      - '-proxysocketendpointfilemode=0666'
+      # PING, VERSION, EVENTS - Mostly harmless and almost required for any service.
+      # CONTAINERS - For Netdata.
+      # INFO, IMAGES - For Netdata go.d docker plugin.
+      - '-allowHEAD=(/v1\.\d\d)?/_ping'
+      - '-allowGET=(/v1\.\d\d)?/(_ping|version|events|info|containers/.*|images/.*)'
+
+  postfix-exporter:
+    build: "postfix-exporter"
+    container_name: "postfix-exporter"
+    restart: always
+    ports:
+      - "127.0.0.1:9154:9154"
+    volumes:
+      - "postfix-log:/var/log/postfix:ro"
+      - "/var/spool/postfix:/var/spool/postfix:ro"
+    command:
+      - "--postfix.logfile_path=/var/log/postfix/log"
+
+  netdata:
+    build:
+      context: "netdata"
+      args:
+        UID_POSTFIX: "${UID_POSTFIX:?}"
+        GID_POSTFIX: "${GID_POSTFIX:?}"
+        GID_POSTDROP: "${GID_POSTDROP:?}"
+    container_name: "netdata"
+    restart: always
+    pid: host
+    cap_add:
+      - SYS_PTRACE
+      - SYS_ADMIN
+    security_opt:
+      - "apparmor:unconfined"
+    network_mode: host
+    volumes:
+      - "/dev/log:/dev/log:ro"
+      - "netdata-lib:/var/lib/netdata"
+      - "netdata-cache:/var/cache/netdata"
+      - "/etc/passwd:/host/etc/passwd:ro"
+      - "/etc/group:/host/etc/group:ro"
+      - "/etc/localtime:/etc/localtime:ro"
+      - "/proc:/host/proc:ro"
+      - "/sys:/host/sys:ro"
+      - "/etc/os-release:/host/etc/os-release:ro"
+      - "/var/log:/host/var/log:ro"
+      - "/var/lib/apt/periodic:/host/var/lib/apt/periodic:ro" # filecheck (apt updates)
+      - "/run/dbus:/run/dbus:ro" # systemd-list-units
+      - "/run/systemd/private:/run/systemd/private:ro" # systemdunits
+      - "/var/spool/postfix:/var/spool/postfix:ro"
+      - "/boot:/boot:ro" # disk usage
+      - "/run:/host/run:ro" # disk usage
+      - "caddy-data:/tls:ro" # x509check
+      - "docker-socket:/socket/:ro" # docker-socket-proxy
+    environment:
+      DOCKER_HOST: "unix:///socket/docker.sock" # docker-socket-proxy
+      DISABLE_TELEMETRY: "1"
+      HOST_GATEWAY_IP: "${HOST_GATEWAY_IP:?}"
+      TG_CHAT_ID: "${NETDATA_TG_CHAT_ID:?}"
+      TG_TOKEN: "${NETDATA_TG_TOKEN:?}"

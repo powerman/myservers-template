@@ -1,0 +1,48 @@
+{
+	email me@example.com
+	auto_https disable_redirects
+	pki {
+		ca {
+			root {
+				cert /ca.crt
+				key /ca.key
+			}
+		}
+	}
+	log default {
+		format filter {
+			wrap console
+			fields {
+				request>headers delete
+				request>remote_port delete
+				request>tls delete
+				resp_headers delete
+			}
+		}
+	}
+}
+
+# Get certificates for non-HTTP services.
+smtp.primary.example.com {
+}
+pop3.example.com {
+}
+imap.example.com {
+}
+
+netdata.primary.example.com {
+	basicauth {
+		me {{ .Env.BASICAUTH_ME }}
+	}
+
+	reverse_proxy host.docker.internal:19999
+}
+
+primary.example.com {
+	root * /srv/primary.example.com
+
+	basicauth /djbdns/data bcrypt DNS {
+		secondary-dns {{ .Env.BASICAUTH_SECONDARY_DNS }}
+	}
+	file_server /djbdns/data
+}

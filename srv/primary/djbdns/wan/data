@@ -1,0 +1,32 @@
+.example.com:100.1.1.1:a:300
+.example.com:100.3.3.3:b:300
+
+#-- Certification Authority Authorization (CAA) by https://sslmate.com/caa/
+:example.com:257:\000\005issueletsencrypt.org
+:example.com:257:\000\005iodefmailto\072me@example.com
+
+#-- SMTP
+@example.com::smtp.primary.example.com.:0
+@example.com::smtp.secondary.example.com.:1
+'example.com:v=spf1 ip4\072100.2.2.2 -all:300
+'default._domainkey.example.com:v=DKIM1; k=rsa; p=EXAMPLE:300
+'_dmarc.example.com:v=DMARC1; p=reject; rua=mailto\072postmaster@example.com; ruf=mailto\072postmaster@example.com; fo=d; adkim=s; aspf=s; sp=none:300
+'example.com._report._dmarc.example.com:v=DMARC1;:300
+
+#-- Host: example.com
++example.com:100.1.1.1:300
+Cwww.example.com:example.com:300
+
+#-- Host: primary.example.com
++primary.example.com:100.2.2.2:300
+Cnetdata.primary.example.com:primary.example.com:300
++smtp.primary.example.com:100.2.2.2:300
+Csmtp.example.com:primary.example.com:300
+Cpop3.example.com:primary.example.com:300
+Cimap.example.com:primary.example.com:300
++home.vpn.example.com:100.2.2.2:300
+
+#-- Host: secondary.example.com
++secondary.example.com:100.3.3.3:300
+Cnetdata.secondary.example.com:secondary.example.com:300
++smtp.secondary.example.com:100.3.3.3:300

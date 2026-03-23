@@ -1,0 +1,6 @@
+if_missing = "error"
+
+[secrets]
+NETDATA_TG_TOKEN = { provider = "age", value = "EXAMPLE" }
+NETDATA_TG_CHAT_ID = { provider = "age", value = "EXAMPLE" }
+NETDATA_HTTPCHECK_TR_PASSWORD = { provider = "age", value = "EXAMPLE" }

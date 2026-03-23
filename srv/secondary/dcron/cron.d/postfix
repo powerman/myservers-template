@@ -1,0 +1,5 @@
+# MIN HOUR DAY MONTH DAYOFWEEK   COMMAND
+* *   * * * ID=pftlsupdate FREQ=30d docker restart postfix
+* 0-2 * * * ID=pflogrotate FREQ=1d  docker exec postfix postfix logrotate
+* 3-5 * * * ID=pflogsumm   FREQ=1d  pflogsumm -d yesterday --problems-first --rej-add-from <(zcat /var/log/postfix/*.gz 2>/dev/null | sed 's/^\(... \)0/\1 /')
+0 *   * * * ID=pflogclean           find /var/log/postfix/ -type f -mtime +3 -delete

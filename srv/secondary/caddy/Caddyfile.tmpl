@@ -1,0 +1,27 @@
+{
+	email me@example.com
+	auto_https disable_redirects
+	log default {
+		format filter {
+			wrap console
+			fields {
+				request>headers delete
+				request>remote_port delete
+				request>tls delete
+				resp_headers delete
+			}
+		}
+	}
+}
+
+# Get certificates for non-HTTP services.
+smtp.secondary.example.com {
+}
+
+netdata.secondary.example.com {
+	basicauth {
+		me {{ .Env.BASICAUTH_ME }}
+	}
+
+	reverse_proxy host.docker.internal:19999
+}

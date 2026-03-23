@@ -1,0 +1,14 @@
+if_missing = "error"
+
+[secrets]
+DCRON_RCLONE_ACCESS_KEY_ID = { provider = "age", value = "EXAMPLE" }
+DCRON_RCLONE_SECRET_ACCESS_KEY = { provider = "age", value = "EXAMPLE" }
+CADDY_BASICAUTH_ME = { provider = "age", value = "EXAMPLE" }
+CADDY_BASICAUTH_SECONDARY_DNS = { provider = "age", value = "EXAMPLE" }
+NETDATA_TG_TOKEN = { provider = "age", value = "EXAMPLE" }
+NETDATA_TG_CHAT_ID = { provider = "age", value = "EXAMPLE" }
+CADDY_CA_KEY = { provider = "age", value = "EXAMPLE" }
+WG_HOME_PRIVATE_KEY = { provider = "age", value = "EXAMPLE" }
+COURIER_USERDB = { provider = "age", value = "EXAMPLE" }
+POSTFIX_DKIM_KEY = { provider = "age", value = "EXAMPLE" }
+DCRON_DUPLICITY_GPG_PASS = { provider = "age", value = "EXAMPLE" }

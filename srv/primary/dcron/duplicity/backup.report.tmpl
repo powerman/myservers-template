@@ -1,0 +1,26 @@
+{{- range $p := splitList " " .Env.PROM_PROFILES }}
+{{-     $log := readFile (printf "%s/%s.log" $.Env.PROM_PREFIX $p) -}}
+{{-     $elapsed_line  := regexFind "(?m)^ElapsedTime .*"                $log -}}
+{{-     $srcsize_line  := regexFind "(?m)^SourceFileSize .*"             $log -}}
+{{-     $newfiles_line := regexFind "(?m)^NewFiles .*"                   $log -}}
+{{-     $delfiles_line := regexFind "(?m)^DeletedFiles .*"               $log -}}
+{{-     $chgfiles_line := regexFind "(?m)^ChangedFiles .*"               $log -}}
+{{-     $destchg_line  := regexFind "(?m)^TotalDestinationSizeChange .*" $log -}}
+{{-     $errors_line   := regexFind "(?m)^Errors .*"                     $log -}}
+{{-     if $elapsed_line -}}
+{{-         $elapsed  := regexFind "[0-9.]+" (trimPrefix "ElapsedTime "  $elapsed_line) -}}
+{{-         $src_open := regexFind "\\([0-9.]+"                          $srcsize_line  -}}
+{{-         $src_unit := regexFind "[A-Za-z]+\\)"                        $srcsize_line  -}}
+{{-         $new_n    := regexFind "[0-9]+" (trimPrefix "NewFiles "      $newfiles_line) -}}
+{{-         $del_n    := regexFind "[0-9]+" (trimPrefix "DeletedFiles "  $delfiles_line) -}}
+{{-         $chg_n    := regexFind "[0-9]+" (trimPrefix "ChangedFiles "  $chgfiles_line) -}}
+{{-         $destchg  := regexFind "[0-9]+" (trimPrefix "TotalDestinationSizeChange " $destchg_line) -}}
+{{-         $dst_open := regexFind "\\([0-9.]+"                          $destchg_line  -}}
+{{-         $dst_unit := regexFind "[A-Za-z]+\\)"                        $destchg_line  -}}
+{{-         $errors   := regexFind "[0-9]+" (trimPrefix "Errors "        $errors_line)  -}}
+{{-         printf "%-15s %7ss %5s %-6s %7s%7s%7s %11s %5s %-6s Errors %s\n" $p $elapsed $src_open $src_unit (printf "+%s" $new_n) (printf "-%s" $del_n) (printf "~%s" $chg_n) $destchg $dst_open $dst_unit $errors -}}
+{{-     else -}}
+{{-         printf "%-15s FAILED\n" $p -}}
+{{-     end -}}
+{{- end }}
+{{ .Env.PROM_RCLONE }}

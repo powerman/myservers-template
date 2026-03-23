@@ -1,0 +1,130 @@
+---
+config:
+  # GitHub and Obsidian does not support elk layout, so the diagram looks much worse there.
+  layout: elk
+  elk:
+#    mergeEdges: true
+#    nodePlacementStrategy: SIMPLE
+    nodePlacementStrategy: NETWORK_SIMPLEX
+#    nodePlacementStrategy: LINEAR_SEGMENTS
+  fontFamily: '"Verdana", "Helvetica", "Arial", sans-serif'
+  wrap: false
+  markdownAutoWrap: false
+  flowchart:
+    wrappingWidth: 600
+---
+flowchart LR
+    do_backup["`
+        **DO Spaces S3** 250GB
+         
+        **_Backups:_**
+        primary/postsrsd
+        primary/virtual-mailbox
+        _other hosts/mobile devices_
+        `"]
+
+    netdata_cloud["`
+        **Netdata Cloud**
+         
+        **_Connected:_**
+        netdata.primary.example.com
+        netdata.secondary.example.com
+        localhost:19999 (HOMELAB)
+        `"]
+
+    inet(["Internet"])
+
+    do_reserved_ip["`
+        **DO Reserved IP**
+        _Public services (except SMTP)_
+         
+        100.1.1.1
+        example.com
+        a.ns.example.com
+        `"]
+
+    subgraph PRIMARY ["`**PRIMARY** 1vCPU/1GB`"]
+        p_anchor["`
+            **eth0**
+            _anchor_
+             
+            10.123.0.5
+            `"]
+        p_eth0["`
+            **eth0**
+            _Internal services; public SMTP_
+             
+            100.2.2.2
+            primary.example.com
+            netdata.primary.example.com
+            smtp.primary.example.com
+            smtp.example.com
+            pop3.example.com
+            imap.example.com
+            home.vpn.example.com
+            `"]
+        p_wg_home["`
+            **wg.home** WG 888
+            _routes: Internet+192.168.0.0/23_
+             
+            192.168.1.1
+            `"]
+    end
+
+    subgraph SECONDARY ["`**SECONDARY** 4vCPU/8GB`"]
+        s_ens3["`
+            **ens3**
+            _Secondary DNS+SMTP_
+             
+            100.3.3.3
+            secondary.example.com
+            netdata.secondary.example.com
+            b.ns.example.com
+            smtp.secondary.example.com
+            `"]
+    end
+
+    subgraph HOMELAB ["`**HOMELAB**`"]
+        pm_local["`
+            **eth0**
+             
+            192.168.0.1
+            `"]
+        pm_wg_home["`
+            **wg.home**
+             
+            192.168.1.2
+            `"]
+    end
+
+    %% LEGEND:
+    %% ---> normal connection (solid line)
+    %% -.-> connection forwarding (dashed line)
+    %% ===> permanent connection (double line)
+
+    inet -- DNS --> do_reserved_ip
+    inet -- SSH HTTP HTTPS --> do_reserved_ip
+    do_reserved_ip == [DO hypervisor] === p_anchor
+
+    inet -- WG 888 --> p_eth0
+    inet -- SMTP 26 587 465 POP3S IMAPS --> p_eth0
+    inet -- HTTPS --> p_eth0
+
+    inet -- DNS --> s_ens3
+    inet -- SMTP --> s_ens3
+    inet -- HTTPS --> s_ens3
+
+    SECONDARY -- DNS sync HTTPS --> p_eth0
+    SECONDARY -- mail relay SMTP --> p_eth0
+
+    HOMELAB -- POP3S --> p_eth0
+
+    %% Only when VPN is up (99% of the time).
+    pm_wg_home == WG 888 ==> p_wg_home
+    HOMELAB -- DNS sync HTTPS --> p_wg_home
+    HOMELAB -- mail relay SMTP --> p_wg_home
+    p_anchor -. SSH HTTP HTTPS .-> pm_wg_home
+
+    %% Fake invisible links to improve diagram layout.
+    do_backup ~~~ HOMELAB
+    netdata_cloud ~~~ HOMELAB

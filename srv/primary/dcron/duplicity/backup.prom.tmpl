@@ -1,0 +1,60 @@
+# HELP backup_last_run_timestamp_seconds Unix timestamp of last backup run.
+# TYPE backup_last_run_timestamp_seconds gauge
+backup_last_run_timestamp_seconds {{ now | unixEpoch }}
+{{- if .Env.PROM_PROFILES }}
+# HELP backup_exit_code Exit code of last backup (0 = success).
+# TYPE backup_exit_code gauge
+{{-     range splitList " " .Env.PROM_PROFILES }}
+backup_exit_code{profile="{{ . }}"} {{ trim (readFile (printf "%s/%s.rc" $.Env.PROM_PREFIX .)) }}
+{{-     end }}
+# HELP backup_elapsed_seconds Duration of last backup in seconds.
+# TYPE backup_elapsed_seconds gauge
+{{-     range $p := splitList " " .Env.PROM_PROFILES }}
+{{-         range splitList "\n" (readFile (printf "%s/%s.log" $.Env.PROM_PREFIX $p)) }}
+{{-             if hasPrefix "ElapsedTime " . }}
+backup_elapsed_seconds{profile="{{ $p }}"} {{ regexFind "[0-9.]+" (trimPrefix "ElapsedTime " .) }}
+{{-             end }}
+{{-         end }}
+{{-     end }}
+# HELP backup_source_size_bytes Source data size in bytes.
+# TYPE backup_source_size_bytes gauge
+{{-     range $p := splitList " " .Env.PROM_PROFILES }}
+{{-         range splitList "\n" (readFile (printf "%s/%s.log" $.Env.PROM_PREFIX $p)) }}
+{{-             if hasPrefix "SourceFileSize " . }}
+backup_source_size_bytes{profile="{{ $p }}"} {{ regexFind "[0-9]+" (trimPrefix "SourceFileSize " .) }}
+{{-             end }}
+{{-         end }}
+{{-     end }}
+# HELP backup_dest_change_bytes Destination size change in bytes.
+# TYPE backup_dest_change_bytes gauge
+{{-     range $p := splitList " " .Env.PROM_PROFILES }}
+{{-         range splitList "\n" (readFile (printf "%s/%s.log" $.Env.PROM_PREFIX $p)) }}
+{{-             if hasPrefix "TotalDestinationSizeChange " . }}
+backup_dest_change_bytes{profile="{{ $p }}"} {{ regexFind "[0-9]+" (trimPrefix "TotalDestinationSizeChange " .) }}
+{{-             end }}
+{{-         end }}
+{{-     end }}
+# HELP backup_errors Number of errors during backup.
+# TYPE backup_errors gauge
+{{-     range $p := splitList " " .Env.PROM_PROFILES }}
+{{-         range splitList "\n" (readFile (printf "%s/%s.log" $.Env.PROM_PREFIX $p)) }}
+{{-             if hasPrefix "Errors " . }}
+backup_errors{profile="{{ $p }}"} {{ regexFind "[0-9]+" (trimPrefix "Errors " .) }}
+{{-             end }}
+{{-         end }}
+{{-     end }}
+{{- end }}{{/* if .Env.PROM_PROFILES */}}
+# HELP s3_bucket_size_bytes Total size of backup target in bytes.
+# TYPE s3_bucket_size_bytes gauge
+{{- range splitList "\n" .Env.PROM_RCLONE }}
+{{-     if hasPrefix "Total size: " . }}
+s3_bucket_size_bytes {{ regexFind "[0-9]+" (regexFind "\\([0-9]+ Byte" .) }}
+{{-     end }}
+{{- end }}
+# HELP s3_bucket_objects_total Total number of objects at backup target.
+# TYPE s3_bucket_objects_total gauge
+{{- range splitList "\n" .Env.PROM_RCLONE }}
+{{-     if hasPrefix "Total objects: " . }}
+s3_bucket_objects_total {{ regexFind "[0-9]+" (trimPrefix "Total objects: " .) }}
+{{-     end }}
+{{- end }}
